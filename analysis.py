@@ -7,6 +7,8 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from sqlalchemy import create_engine
 from scipy import stats
+import plotly.express as px
+import plotly.io as pio
 
 sns.set_palette('colorblind')
 
@@ -157,6 +159,55 @@ def create_visualizations(kpi_results, stat_results):
 
     print("All KPI visualizations saved to output/ folder.")
 
+def create_plotly_dashboard(kpi_results):
+    
+    figs = []
+
+    df1 = kpi_results['monthly_revenue'].reset_index()
+    df1.columns = ['month', 'revenue']
+    df1['month'] = df1['month'].astype(str)
+
+    fig1 = px.line(df1, x='month', y='revenue', title='Monthly Revenue Trend')
+    figs.append(fig1)
+
+    df2 = kpi_results['weekly_orders'].reset_index()
+    df2.columns = ['week', 'orders']
+    df2['week'] = df2['week'].astype(str)
+
+    fig2 = px.line(df2, x='week', y='orders', title='Weekly Order Volume')
+    figs.append(fig2)
+
+    fig3 = px.bar(
+        kpi_results['aov_by_category'],
+        x='category',
+        y='avg_order_value',
+        title='Average Order Value by Category'
+    )
+    figs.append(fig3)
+
+    fig4 = px.bar(
+        kpi_results['top_products'],
+        x='product_name',
+        y='total_quantity',
+        title='Top Selling Products'
+    )
+    figs.append(fig4)
+
+    df5 = kpi_results['customer_retention'].reset_index()
+    df5.columns = ['month', 'retention']
+    df5['month'] = df5['month'].astype(str)
+
+    fig5 = px.line(df5, x='month', y='retention', title='Customer Retention Rate')
+    figs.append(fig5)
+
+    html = ""
+    for fig in figs:
+        html += pio.to_html(fig, full_html=False, include_plotlyjs='cdn')
+
+    with open("output/dashboard.html", "w") as f:
+        f.write(html)
+
+    print("Interactive dashboard saved to output/dashboard.html")
 
 def main():
     os.makedirs("output", exist_ok=True)
@@ -165,6 +216,7 @@ def main():
     kpi_results = compute_kpis(data_dict)
     stat_results = run_statistical_tests(data_dict)
     create_visualizations(kpi_results, stat_results)
+    create_plotly_dashboard(kpi_results)
 
     print("=== KPI Summary ===")
     for k, v in kpi_results.items():

@@ -1,11 +1,3 @@
-"""Integration 4 — KPI Dashboard: Amman Digital Market Analytics
-
-Extract data from PostgreSQL, compute KPIs, run statistical tests,
-and create visualizations for the executive summary.
-
-Usage:
-    python analysis.py
-"""
 import os
 import pandas as pd
 import numpy as np
@@ -13,108 +5,229 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import seaborn as sns
-from scipy import stats
 from sqlalchemy import create_engine
+from scipy import stats
+import plotly.express as px
+import plotly.io as pio
+
+sns.set_palette('colorblind')
 
 
 def connect_db():
-    """Create a SQLAlchemy engine connected to the amman_market database.
-
-    Returns:
-        engine: SQLAlchemy engine instance
-
-    Notes:
-        Use DATABASE_URL environment variable if set, otherwise default to:
-        postgresql://postgres:postgres@localhost:5432/amman_market
-    """
-    # TODO: Create and return a SQLAlchemy engine using DATABASE_URL or a default
-    pass
+    database_url = os.getenv(
+        "DATABASE_URL",
+        "postgresql+psycopg://postgres:postgres@localhost:5432/amman_market"
+    )
+    engine = create_engine(database_url)
+    return engine
 
 
 def extract_data(engine):
-    """Extract all required tables from the database into DataFrames.
-
-    Args:
-        engine: SQLAlchemy engine connected to amman_market
-
-    Returns:
-        dict: mapping of table names to DataFrames
-              (e.g., {"customers": df, "products": df, "orders": df, "order_items": df})
-    """
-    # TODO: Query each table and return a dictionary of DataFrames
-    pass
+    customers_df = pd.read_sql("SELECT * FROM customers;", engine)
+    products_df = pd.read_sql("SELECT * FROM products;", engine)
+    orders_df = pd.read_sql("SELECT * FROM orders WHERE status != 'cancelled';", engine)
+    order_items_df = pd.read_sql("SELECT * FROM order_items WHERE quantity <= 100;", engine)
+    
+    return {
+        "customers": customers_df,
+        "products": products_df,
+        "orders": orders_df,
+        "order_items": order_items_df
+    }
 
 
 def compute_kpis(data_dict):
-    """Compute the 5 KPIs defined in kpi_framework.md.
+    orders = data_dict['orders']
+    order_items = data_dict['order_items']
+    products = data_dict['products']
+    customers = data_dict['customers']
 
-    Args:
-        data_dict: dict of DataFrames from extract_data()
+    # Merge data for calculations
+    merged = order_items.merge(orders, on='order_id', how='left')
+    merged = merged.merge(products, on='product_id', how='left')
+    merged = merged.merge(customers[['customer_id']], on='customer_id', how='left')
 
-    Returns:
-        dict: mapping of KPI names to their computed values (or DataFrames
-              for time-series / cohort KPIs)
+    # --- KPI 1: Monthly Revenue ---
+    merged['month'] = pd.to_datetime(merged['order_date']).dt.to_period('M')
+    monthly_revenue = merged.groupby('month').apply(lambda x: (x['quantity'] * x['unit_price']).sum())
 
-    Notes:
-        At least 2 KPIs should be time-based and 1 should be cohort-based.
-    """
-    # TODO: Join tables as needed, then compute each KPI from your framework
-    # TODO: Return results as a dictionary for use in visualizations
-    pass
+    # --- KPI 2: Weekly Order Volume ---
+    merged['week'] = pd.to_datetime(merged['order_date']).dt.to_period('W')
+    weekly_orders = merged.groupby('week')['order_id'].nunique()
+
+    # --- KPI 3: Average Order Value by Product Category ---
+    aov_category = merged.groupby('category').apply(
+        lambda x: (x['quantity'] * x['unit_price']).sum() / x['order_id'].nunique()
+    ).reset_index().rename(columns={0:'avg_order_value'})
+
+    # --- KPI 4: Customer Retention Rate (monthly) ---
+    monthly_customers = merged.groupby('month')['customer_id'].nunique()
+    returning_customers = merged[merged.duplicated(['customer_id'], keep=False)]
+    monthly_returning = returning_customers.groupby('month')['customer_id'].nunique()
+    retention_rate = (monthly_returning / monthly_customers * 100).fillna(0)
+
+    # --- KPI 5: Top Selling Products ---
+    top_products = merged.groupby('product_name')['quantity'].sum().sort_values(ascending=False).head(10)
+    top_products = top_products.reset_index().rename(columns={'quantity':'total_quantity'})
+
+    return {
+        'monthly_revenue': monthly_revenue,
+        'weekly_orders': weekly_orders,
+        'aov_by_category': aov_category,
+        'customer_retention': retention_rate,
+        'top_products': top_products
+    }
 
 
 def run_statistical_tests(data_dict):
-    """Run hypothesis tests to validate patterns in the data.
+    merged = data_dict['order_items'].merge(data_dict['orders'], on='order_id', how='left')
+    merged = merged.merge(data_dict['products'], on='product_id', how='left')
 
-    Args:
-        data_dict: dict of DataFrames from extract_data()
+    # Test: Does AOV differ across product categories? -> ANOVA
+    category_groups = [group['quantity']*group['unit_price'] for name, group in merged.groupby('category')]
+    f_stat, p_value = stats.f_oneway(*category_groups)
+    interpretation = "Reject H0" if p_value < 0.05 else "Fail to reject H0"
 
-    Returns:
-        dict: mapping of test names to results (test statistic, p-value,
-              interpretation)
-
-    Notes:
-        Run at least one test. Consider:
-        - Does average order value differ across product categories?
-        - Is there a significant trend in monthly revenue?
-        - Do customer cities differ in purchasing behavior?
-    """
-    # TODO: Select and run appropriate statistical tests
-    # TODO: Interpret results (reject or fail to reject the null hypothesis)
-    pass
+    return {
+        'anova_aov_category': {
+            'H0': 'Average order value is the same across categories',
+            'H1': 'Average order value differs across categories',
+            'f_stat': f_stat,
+            'p_value': p_value,
+            'interpretation': interpretation
+        }
+    }
 
 
 def create_visualizations(kpi_results, stat_results):
-    """Create publication-quality charts for all 5 KPIs.
+    sns.set_palette('colorblind')
+    
+    # --- Multi-panel figure: Monthly Revenue + Weekly Orders ---
+    fig, axes = plt.subplots(2, 1, figsize=(12, 10))
+    
+    kpi_results['monthly_revenue'].plot(ax=axes[0], kind='line', marker='o', color='tab:blue')
+    axes[0].set_title("Monthly Revenue Trend")
+    axes[0].set_ylabel("Revenue (JOD)")
+    axes[0].grid(True)
 
-    Args:
-        kpi_results: dict from compute_kpis()
-        stat_results: dict from run_statistical_tests()
+    kpi_results['weekly_orders'].plot(ax=axes[1], kind='line', marker='s', color='tab:green')
+    axes[1].set_title("Weekly Order Volume")
+    axes[1].set_ylabel("Number of Orders")
+    axes[1].grid(True)
 
-    Returns:
-        None
+    plt.tight_layout()
+    plt.savefig("output/multi_panel_time_based.png")
+    plt.close()
 
-    Side effects:
-        Saves at least 5 PNG files to the output/ directory.
-        Each chart should have a descriptive title stating the finding,
-        proper axis labels, and annotations where appropriate.
-    """
-    # TODO: Create one visualization per KPI, saved to output/
-    # TODO: Use appropriate chart types (bar, line, scatter, heatmap, etc.)
-    # TODO: Ensure titles state the insight, not just the data
-    pass
+    # --- Boxplot: Average Order Value by Product Category ---
+    plt.figure(figsize=(10,6))
+    sns.boxplot(
+        x='category', 
+        y='avg_order_value', 
+        data=kpi_results['aov_by_category']
+    )
+    plt.title("Average Order Value by Product Category")
+    plt.xlabel("Product Category")
+    plt.ylabel("Average Order Value (JOD)")
+    plt.savefig("output/aov_boxplot.png")
+    plt.close()
 
+    # --- Bar chart: Top Selling Products ---
+    plt.figure(figsize=(12,6))
+    sns.barplot(
+        x='product_name',
+        y='total_quantity',
+        data=kpi_results['top_products']
+    )
+    plt.title("Top Selling Products (Quantity Sold)")
+    plt.xlabel("Product")
+    plt.ylabel("Quantity Sold")
+    plt.xticks(rotation=45, ha='right')
+    plt.tight_layout()
+    plt.savefig("output/top_products.png")
+    plt.close()
+
+    # --- Line chart: Customer Retention Rate ---
+    plt.figure(figsize=(10,6))
+    kpi_results['customer_retention'].plot(kind='line', marker='o', color='tab:orange')
+    plt.title("Customer Retention Rate Over Time")
+    plt.xlabel("Month")
+    plt.ylabel("Retention Rate (%)")
+    plt.grid(True)
+    plt.savefig("output/customer_retention.png")
+    plt.close()
+
+    print("All KPI visualizations saved to output/ folder.")
+
+def create_plotly_dashboard(kpi_results):
+    
+    figs = []
+
+    df1 = kpi_results['monthly_revenue'].reset_index()
+    df1.columns = ['month', 'revenue']
+    df1['month'] = df1['month'].astype(str)
+
+    fig1 = px.line(df1, x='month', y='revenue', title='Monthly Revenue Trend')
+    figs.append(fig1)
+
+    df2 = kpi_results['weekly_orders'].reset_index()
+    df2.columns = ['week', 'orders']
+    df2['week'] = df2['week'].astype(str)
+
+    fig2 = px.line(df2, x='week', y='orders', title='Weekly Order Volume')
+    figs.append(fig2)
+
+    fig3 = px.bar(
+        kpi_results['aov_by_category'],
+        x='category',
+        y='avg_order_value',
+        title='Average Order Value by Category'
+    )
+    figs.append(fig3)
+
+    fig4 = px.bar(
+        kpi_results['top_products'],
+        x='product_name',
+        y='total_quantity',
+        title='Top Selling Products'
+    )
+    figs.append(fig4)
+
+    df5 = kpi_results['customer_retention'].reset_index()
+    df5.columns = ['month', 'retention']
+    df5['month'] = df5['month'].astype(str)
+
+    fig5 = px.line(df5, x='month', y='retention', title='Customer Retention Rate')
+    figs.append(fig5)
+
+    html = ""
+    for fig in figs:
+        html += pio.to_html(fig, full_html=False, include_plotlyjs='cdn')
+
+    with open("output/dashboard.html", "w") as f:
+        f.write(html)
+
+    print("Interactive dashboard saved to output/dashboard.html")
 
 def main():
-    """Orchestrate the full analysis pipeline."""
     os.makedirs("output", exist_ok=True)
+    engine = connect_db()
+    data_dict = extract_data(engine)
+    kpi_results = compute_kpis(data_dict)
+    stat_results = run_statistical_tests(data_dict)
+    create_visualizations(kpi_results, stat_results)
+    create_plotly_dashboard(kpi_results)
 
-    # TODO: Connect to the database
-    # TODO: Extract data
-    # TODO: Compute KPIs
-    # TODO: Run statistical tests
-    # TODO: Create visualizations
-    # TODO: Print a summary of KPI values and test results
+    print("=== KPI Summary ===")
+    for k, v in kpi_results.items():
+        print(f"{k}:\n{v}\n")
+
+    print("=== Statistical Test Summary ===")
+    for test, result in stat_results.items():
+        print(f"{test}:")
+        for k, val in result.items():
+            print(f"{k}: {val}")
+        print()
 
 
 if __name__ == "__main__":

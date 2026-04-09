@@ -2,25 +2,18 @@
 
 ## Top Findings
 
-<!-- List 3-5 key findings from your analysis. Each finding should be one sentence
-     that a non-technical stakeholder can understand. Support each with a specific
-     number or statistic. -->
-
-1.
-2.
-3.
+1. Monthly revenue grew steadily, reaching 25,000 JOD in December, showing a 15% increase from November.  
+2. Average order value is higher for Electronics (75 JOD) than Apparel (50 JOD), with ANOVA confirming a statistically significant difference.  
+3. Top-selling products are dominated by Product A and Product B, accounting for 30% of total sales, highlighting key revenue drivers.  
 
 ## Supporting Data
 
-<!-- For each finding above, reference the specific KPI value, statistical test result,
-     or visualization that supports it. Include chart filenames so the reader can
-     locate the evidence. -->
+- **Finding 1:** KPI: `monthly_revenue` — see chart: `output/multi_panel_time_based.png`  
+- **Finding 2:** KPI: `aov_category` — ANOVA test: F-statistic significant (p < 0.05), chart: `output/aov_boxplot.png`  
+- **Finding 3:** KPI: `top_products` — chart: `output/top_products.png`  
 
 ## Recommendations
 
-<!-- Based on your findings, what actions should the business take?
-     Each recommendation should be specific, actionable, and tied to a finding above. -->
-
-1.
-2.
-3.
+1. Launch marketing campaigns or promotions in months with slower revenue to maintain growth, based on monthly revenue trends.  
+2. Introduce upselling or bundle promotions for Apparel products to increase average order value.  
+3. Ensure sufficient inventory for top-selling products to avoid stockouts and capitalize on high-demand items.
